@@ -255,4 +255,37 @@ export const orderService = {
     }
     return getCollection<CreatedOrder>(endpoint, token);
   },
+
+  async createReturns(
+    token: string,
+    returns: { item_id: number; customer_id: number; quantity: number; reason?: string | null }[]
+  ): Promise<ServiceResult<any[]>> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/returns`, {
+        method: 'POST',
+        headers: getHeaders(token, true),
+        body: JSON.stringify({ returns }),
+      });
+
+      const payload = await readJsonResponse<CollectionResponse<any>>(response);
+
+      if (!response.ok || !payload?.success || !Array.isArray(payload.data)) {
+        return {
+          ok: false,
+          message:
+            payload?.message ?? `Request failed with status ${response.status}.`,
+        };
+      }
+
+      return {
+        ok: true,
+        data: payload.data,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: getErrorMessage(error),
+      };
+    }
+  },
 };

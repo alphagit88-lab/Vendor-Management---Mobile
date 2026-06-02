@@ -417,6 +417,15 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
   const [historyMonth, setHistoryMonth] = useState(new Date().getMonth() + 1);
   const [historyYear, setHistoryYear] = useState(new Date().getFullYear());
   const [expandedOrders, setExpandedOrders] = useState<Record<number, boolean>>({});
+  const [selectedReturns, setSelectedReturns] = useState<
+    Record<number, { quantity: number; reason: string }>
+  >({});
+  const [returnModalProduct, setReturnModalProduct] =
+    useState<PersonalInventoryItem | null>(null);
+  const [returnQuantityInput, setReturnQuantityInput] = useState('');
+  const [returnReasonInput, setReturnReasonInput] = useState('');
+  const [returnError, setReturnError] = useState<string | null>(null);
+  const [isSubmittingReturns, setIsSubmittingReturns] = useState(false);
   const [historyStatus, setHistoryStatus] = useState<LoadStatus>('idle');
 
   // Signature States
@@ -691,6 +700,97 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
 
     if (customQuantityError) {
       setCustomQuantityError(null);
+    }
+  };
+
+  const closeReturnModal = () => {
+    setReturnModalProduct(null);
+    setReturnQuantityInput('');
+    setReturnReasonInput('');
+    setReturnError(null);
+  };
+
+  const openReturnModal = (product: PersonalInventoryItem) => {
+    setReturnModalProduct(product);
+    setReturnQuantityInput('');
+    setReturnReasonInput('');
+    setReturnError(null);
+  };
+
+  const handleReturnQuantityInput = (value: string) => {
+    setReturnQuantityInput(value.replace(/[^0-9]/g, ''));
+    if (returnError) {
+      setReturnError(null);
+    }
+  };
+
+  const addReturnQuantity = () => {
+    if (!returnModalProduct || !selectedCustomer) {
+      return;
+    }
+
+    const requestedQuantity = Number.parseInt(returnQuantityInput, 10);
+    if (!Number.isInteger(requestedQuantity) || requestedQuantity <= 0) {
+      setReturnError('Enter a quantity greater than 0.');
+      return;
+    }
+
+    if (!returnReasonInput || returnReasonInput.trim().length === 0) {
+      setReturnError('Please enter a reason for the return.');
+      return;
+    }
+
+    setSelectedReturns(prev => ({
+      ...prev,
+      [returnModalProduct.id]: {
+        quantity: requestedQuantity,
+        reason: returnReasonInput,
+      },
+    }));
+
+    closeReturnModal();
+  };
+
+  const removeReturn = (productId: number) => {
+    setSelectedReturns(prev => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+  };
+
+  const handleSubmitReturns = async () => {
+    if (!selectedCustomer) {
+      return;
+    }
+    const returnItems = Object.entries(selectedReturns)
+      .filter(([, r]) => r.quantity > 0)
+      .map(([productId, r]) => ({
+        item_id: Number(productId),
+        customer_id: selectedCustomer.id,
+        quantity: r.quantity,
+        reason: r.reason || undefined,
+      }));
+
+    if (returnItems.length === 0) {
+      return;
+    }
+
+    setIsSubmittingReturns(true);
+    const response = await orderService.createReturns(session.token, returnItems);
+    setIsSubmittingReturns(false);
+
+    if (response.ok) {
+      setSelectedReturns({});
+      setCheckoutFeedback({
+        message: 'Returns submitted successfully!',
+        tone: 'success',
+      });
+    } else {
+      setCheckoutFeedback({
+        message: response.message ?? 'Failed to submit returns.',
+        tone: 'error',
+      });
     }
   };
 
@@ -2793,17 +2893,34 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
                       ) : null}
 
                       <View style={styles.productCardFooter}>
-                        {quantity > 0 ? (
-                          <View style={styles.productSelectedPill}>
-                            <Text style={styles.productSelectedPillLabel}>
-                              {quantity} in order
+                        <View style={{ flexDirection: 'column', gap: 6 }}>
+                          {quantity > 0 ? (
+                            <View style={styles.productSelectedPill}>
+                              <Text style={styles.productSelectedPillLabel}>
+                                {quantity} in order
+                              </Text>
+                            </View>
+                          ) : (
+                            <Text style={styles.productHint}>
+                              Max 10 per item
                             </Text>
-                          </View>
-                        ) : (
-                          <Text style={styles.productHint}>
-                            Max 10 per item
-                          </Text>
-                        )}
+                          )}
+                          {selectedReturns[product.id]?.quantity > 0 ? (
+                            <View style={[styles.productSelectedPill, { backgroundColor: ui.darkSurface, flexDirection: 'row', alignItems: 'center', paddingTop: 6, paddingRight: 12 }]}>
+                              <Text style={[styles.productSelectedPillLabel, { color: ui.softSurface }]}>
+                                Return ({selectedReturns[product.id].quantity})
+                              </Text>
+                              <Pressable
+                                onPress={event => {
+                                  event.stopPropagation();
+                                  removeReturn(product.id);
+                                }}
+                                style={{ marginLeft: 8, padding: 2 }}>
+                                <Text style={{ fontSize: 12, fontWeight: 'bold', color: ui.softSurface }}>✕</Text>
+                              </Pressable>
+                            </View>
+                          ) : null}
+                        </View>
 
                         <View style={[styles.productCardActions, { gap: 6 }]}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -2869,6 +2986,21 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
                             ]}>
                             <Text style={styles.productCustomAddButtonLabel}>ADD</Text>
                           </Pressable>
+
+                          <Pressable
+                            onPress={event => {
+                              event.stopPropagation();
+                              openReturnModal(product);
+                            }}
+                            style={({ pressed }) => [
+                              styles.productCustomAddButton,
+                              pressed ? styles.productCustomAddButtonPressed : null,
+                              { minWidth: 56, paddingHorizontal: 10, backgroundColor: ui.darkSurface }
+                            ]}>
+                            <Text style={[styles.productCustomAddButtonLabel, { color: ui.softSurface }]}>
+                              RETURN
+                            </Text>
+                          </Pressable>
                         </View>
                       </View>
                     </View>
@@ -2900,6 +3032,25 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
                     stay visible while the summary is hidden.
                   </Text>
                 </View>
+
+                <Pressable
+                  onPress={handleSubmitReturns}
+                  disabled={Object.entries(selectedReturns).filter(([, r]) => r.quantity > 0).length === 0 || isSubmittingReturns}
+                  style={({ pressed }) => [
+                    styles.summaryToggleButton,
+                    pressed ? styles.summaryToggleButtonPressed : null,
+                    {
+                      opacity: (Object.entries(selectedReturns).filter(([, r]) => r.quantity > 0).length === 0 || isSubmittingReturns) ? 0.5 : 1
+                    },
+                  ]}>
+                  {isSubmittingReturns ? (
+                    <ActivityIndicator color="white" size="small" />
+                  ) : (
+                    <Text style={styles.summaryToggleButtonLabel}>
+                      Submit Returns {Object.values(selectedReturns).reduce((acc, r) => acc + r.quantity, 0)}
+                    </Text>
+                  )}
+                </Pressable>
 
                 <Pressable
                   onPress={() => setIsSummaryVisible(current => !current)}
@@ -3535,6 +3686,87 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
                     : null,
                 ]}>
                 <Text style={styles.quantityModalConfirmButtonLabel}>Add</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={closeReturnModal}
+        transparent
+        visible={Boolean(returnModalProduct)}>
+        <View style={styles.quantityModalOverlay}>
+          <Pressable
+            onPress={closeReturnModal}
+            style={styles.quantityModalBackdrop}
+          />
+
+          <View style={[styles.quantityModalCard, quantityModalCardStyle]}>
+            <Text style={styles.quantityModalEyebrow}>Return Item</Text>
+            <Text style={styles.quantityModalTitle}>Return quantity</Text>
+            <Text style={styles.quantityModalSubtitle}>
+              {returnModalProduct
+                ? normalizeText(returnModalProduct.item_name)
+                : 'Selected product'}
+            </Text>
+
+            <Text style={styles.quantityModalInputLabel}>
+              Units to return
+            </Text>
+            <TextInput
+              autoFocus
+              keyboardType="number-pad"
+              onChangeText={handleReturnQuantityInput}
+              placeholder="1"
+              placeholderTextColor={ui.darkTextMuted}
+              style={styles.quantityModalInput}
+              value={returnQuantityInput}
+            />
+
+            <Text style={styles.quantityModalInputLabel}>
+              Reason for return
+            </Text>
+            <TextInput
+              multiline
+              numberOfLines={3}
+              onChangeText={setReturnReasonInput}
+              placeholder="Enter reason"
+              placeholderTextColor={ui.darkTextMuted}
+              style={[styles.quantityModalInput, {
+                height: 100,
+                textAlignVertical: 'top',
+                paddingVertical: 12,
+              }]}
+              value={returnReasonInput}
+            />
+
+            {returnError ? (
+              <InlineMessage message={returnError} tone="error" />
+            ) : null}
+
+            <View style={styles.quantityModalActions}>
+              <Pressable
+                onPress={closeReturnModal}
+                style={({ pressed }) => [
+                  styles.quantityModalCancelButton,
+                  pressed ? styles.quantityModalCancelButtonPressed : null,
+                ]}>
+                <Text style={styles.quantityModalCancelButtonLabel}>
+                  Cancel
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={addReturnQuantity}
+                style={({ pressed }) => [
+                  styles.quantityModalConfirmButton,
+                  pressed
+                    ? styles.quantityModalConfirmButtonPressed
+                    : null,
+                ]}>
+                <Text style={styles.quantityModalConfirmButtonLabel}>Return</Text>
               </Pressable>
             </View>
           </View>
@@ -5839,6 +6071,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     justifyContent: 'center',
     minHeight: 44,
+    width: '100%',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
