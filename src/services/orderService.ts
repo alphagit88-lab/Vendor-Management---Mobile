@@ -124,6 +124,8 @@ export const orderService = {
           check_number: request.checkNumber,
           is_checklist: request.isChecklist,
           clientTimestamp: request.clientTimestamp,
+          returns: request.returns,
+          returnAmount: request.returnAmount,
         }),
       });
 

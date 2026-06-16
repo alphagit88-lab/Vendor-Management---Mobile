@@ -427,6 +427,9 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
   const [returnError, setReturnError] = useState<string | null>(null);
   const [isSubmittingReturns, setIsSubmittingReturns] = useState(false);
   const [historyStatus, setHistoryStatus] = useState<LoadStatus>('idle');
+  const [isInvoiceReturnConfirmVisible, setIsInvoiceReturnConfirmVisible] = useState(false);
+  const [invoiceReturnAmountInput, setInvoiceReturnAmountInput] = useState('');
+  const [isChecklistPendingMode, setIsChecklistPendingMode] = useState(false);
 
   // Signature States
   const [customerSignature, setCustomerSignature] = useState<string | null>(null);
@@ -1844,7 +1847,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
       }
     } else {
       // If no order exists, create one with checklist flag
-      await handleGenerateBill(true);
+      await handlePreGenerateBill(true);
     }
   };
 
@@ -1877,8 +1880,19 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
     }
   };
 
+  const handlePreGenerateBill = (isChecklistRequest = false) => {
+    const hasReturns = Object.values(selectedReturns).some((r) => r.quantity > 0);
+    if (hasReturns) {
+      setIsChecklistPendingMode(isChecklistRequest);
+      setInvoiceReturnAmountInput('');
+      setIsInvoiceReturnConfirmVisible(true);
+    } else {
+      handleGenerateBill(isChecklistRequest, []);
+    }
+  };
 
-  const handleGenerateBill = async (isChecklistRequest = false) => {
+
+  const handleGenerateBill = async (isChecklistRequest = false, returnsToProcess: any[] = [], returnAmountToDeduct: number = 0) => {
     setCheckoutFeedback(null); // Clear previous errors
     const generateBillDisabled =
       checkoutState === 'loading' ||
@@ -1930,7 +1944,9 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
       paymentType: paymentType,
       checkNumber: paymentType === 'Check' ? checkNumber : null,
       isChecklist: isChecklistRequest,
-      clientTimestamp: localTimestamp
+      clientTimestamp: localTimestamp,
+      returns: returnsToProcess,
+      returnAmount: returnAmountToDeduct
     };
 
     console.log('📦 GENERATING BILL PAYLOAD:', JSON.stringify(payload, null, 2));
@@ -3034,25 +3050,6 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
                 </View>
 
                 <Pressable
-                  onPress={handleSubmitReturns}
-                  disabled={Object.entries(selectedReturns).filter(([, r]) => r.quantity > 0).length === 0 || isSubmittingReturns}
-                  style={({ pressed }) => [
-                    styles.summaryToggleButton,
-                    pressed ? styles.summaryToggleButtonPressed : null,
-                    {
-                      opacity: (Object.entries(selectedReturns).filter(([, r]) => r.quantity > 0).length === 0 || isSubmittingReturns) ? 0.5 : 1
-                    },
-                  ]}>
-                  {isSubmittingReturns ? (
-                    <ActivityIndicator color="white" size="small" />
-                  ) : (
-                    <Text style={styles.summaryToggleButtonLabel}>
-                      Submit Returns {Object.values(selectedReturns).reduce((acc, r) => acc + r.quantity, 0)}
-                    </Text>
-                  )}
-                </Pressable>
-
-                <Pressable
                   onPress={() => setIsSummaryVisible(current => !current)}
                   style={({ pressed }) => [
                     styles.summaryToggleButton,
@@ -3442,7 +3439,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
 
                   <Pressable
                     disabled={generateBillDisabled}
-                    onPress={() => handleGenerateBill()}
+                    onPress={() => handlePreGenerateBill(false)}
                     style={({ pressed }) => [
                       styles.generateBillButton,
                       isCompactLayout ? styles.generateBillButtonFull : null,
@@ -3464,7 +3461,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
 
                   <Pressable
                     disabled={generateBillDisabled}
-                    onPress={handleGenerateChecklist}
+                    onPress={() => handleGenerateChecklist()}
                     style={({ pressed }) => [
                       styles.generateChecklistButton,
                       isCompactLayout ? styles.generateBillButtonFull : null,
@@ -3831,6 +3828,79 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
               ]}>
               <Text style={styles.categoryDropdownCloseButtonLabel}>Close</Text>
             </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setIsInvoiceReturnConfirmVisible(false)}
+        visible={isInvoiceReturnConfirmVisible}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { width: Math.min(layoutWidth, 400) }]}>
+            <Text style={styles.modalTitle}>Attach Returns to Invoice?</Text>
+            <Text style={{ color: ui.textBody, marginBottom: spacing.md }}>
+              You have selected items for return. Do you want to process these returns and deduct their amount from this invoice?
+            </Text>
+
+            <Text style={styles.modalLabel}>Return Deduction Amount ($)</Text>
+            <TextInput
+              style={styles.modalInput}
+              keyboardType="numeric"
+              placeholder="0.00"
+              placeholderTextColor={ui.textMuted}
+              value={invoiceReturnAmountInput}
+              onChangeText={setInvoiceReturnAmountInput}
+            />
+
+            <View style={[styles.modalActions, { marginTop: spacing.lg, flexDirection: 'column', gap: spacing.sm }]}>
+              <Pressable
+                onPress={() => {
+                  setIsInvoiceReturnConfirmVisible(false);
+                  const amount = parseFloat(invoiceReturnAmountInput) || 0;
+                  const returnsArray = Object.entries(selectedReturns)
+                    .filter(([, r]) => r.quantity > 0)
+                    .map(([productId, r]) => ({
+                      item_id: Number(productId),
+                      customer_id: selectedCustomer?.id,
+                      quantity: r.quantity,
+                      reason: r.reason || undefined,
+                    }));
+                  
+                  handleGenerateBill(isChecklistPendingMode, returnsArray, amount);
+                }}
+                style={({ pressed }) => [
+                  styles.modalPrimaryButton,
+                  pressed ? styles.modalPrimaryButtonPressed : null,
+                  { backgroundColor: ui.highlight }
+                ]}>
+                <Text style={[styles.modalPrimaryButtonLabel, { color: palette.white }]}>Attach Returns & Generate</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  setIsInvoiceReturnConfirmVisible(false);
+                  handleGenerateBill(isChecklistPendingMode, [], 0);
+                }}
+                style={({ pressed }) => [
+                  styles.modalSecondaryButton,
+                  pressed ? styles.modalSecondaryButtonPressed : null,
+                  { backgroundColor: ui.softSurface }
+                ]}>
+                <Text style={styles.modalSecondaryButtonLabel}>Generate WITHOUT Returns</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setIsInvoiceReturnConfirmVisible(false)}
+                style={({ pressed }) => [
+                  styles.modalSecondaryButton,
+                  pressed ? styles.modalSecondaryButtonPressed : null,
+                  { borderWidth: 0, backgroundColor: 'transparent' }
+                ]}>
+                <Text style={[styles.modalSecondaryButtonLabel, { color: ui.textMuted }]}>Cancel</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -6126,6 +6196,75 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  modalCard: {
+    backgroundColor: palette.white,
+    borderRadius: radii.xl,
+    padding: spacing.xl,
+    width: '100%',
+    shadowColor: palette.black,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalLabel: {
+    color: ui.textHeading,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: spacing.xs,
+  },
+  modalInput: {
+    borderWidth: 2,
+    borderColor: ui.cardBorderStrong,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    fontSize: 18,
+    color: ui.textHeading,
+    backgroundColor: ui.softSurface,
+    fontWeight: '700',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  modalSecondaryButton: {
+    backgroundColor: ui.softSurface,
+    borderRadius: radii.pill,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: ui.cardBorderStrong,
+  },
+  modalSecondaryButtonPressed: {
+    backgroundColor: palette.background,
+  },
+  modalSecondaryButtonLabel: {
+    color: palette.textPrimary,
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  modalPrimaryButton: {
+    backgroundColor: palette.primaryStrong,
+    borderRadius: radii.pill,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  modalPrimaryButtonPressed: {
+    opacity: 0.8,
+  },
+  modalPrimaryButtonLabel: {
+    color: palette.white,
+    fontWeight: '800',
+    fontSize: 15,
   },
   modalHeader: {
     alignItems: 'center',

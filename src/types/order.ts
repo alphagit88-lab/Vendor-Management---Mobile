@@ -66,6 +66,8 @@ export interface CreateOrderRequest {
   checkNumber?: string | null;
   isChecklist?: boolean;
   clientTimestamp?: string | null;
+  returns?: any[];
+  returnAmount?: number;
 }
 
 export interface CreateOrderItem {
