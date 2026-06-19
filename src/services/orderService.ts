@@ -126,6 +126,7 @@ export const orderService = {
           clientTimestamp: request.clientTimestamp,
           returns: request.returns,
           returnAmount: request.returnAmount,
+          isUpcRequired: request.isUpcRequired,
         }),
       });
 
@@ -260,7 +261,7 @@ export const orderService = {
 
   async createReturns(
     token: string,
-    returns: { item_id: number; customer_id: number; quantity: number; reason?: string | null }[]
+    returns: { item_id: number; customer_id: number; quantity: number; reason?: string | null; unit_price?: number }[]
   ): Promise<ServiceResult<any[]>> {
     try {
       const response = await fetch(`${API_BASE_URL}/returns`, {

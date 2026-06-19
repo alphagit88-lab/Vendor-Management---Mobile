@@ -68,6 +68,7 @@ export interface CreateOrderRequest {
   clientTimestamp?: string | null;
   returns?: any[];
   returnAmount?: number;
+  isUpcRequired?: boolean;
 }
 
 export interface CreateOrderItem {

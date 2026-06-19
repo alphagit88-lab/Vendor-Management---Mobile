@@ -418,17 +418,17 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
   const [historyYear, setHistoryYear] = useState(new Date().getFullYear());
   const [expandedOrders, setExpandedOrders] = useState<Record<number, boolean>>({});
   const [selectedReturns, setSelectedReturns] = useState<
-    Record<number, { quantity: number; reason: string }>
+    Record<number, { quantity: number; reason: string; unitPrice: number }>
   >({});
   const [returnModalProduct, setReturnModalProduct] =
     useState<PersonalInventoryItem | null>(null);
   const [returnQuantityInput, setReturnQuantityInput] = useState('');
+  const [returnUnitPriceInput, setReturnUnitPriceInput] = useState('');
   const [returnReasonInput, setReturnReasonInput] = useState('');
   const [returnError, setReturnError] = useState<string | null>(null);
   const [isSubmittingReturns, setIsSubmittingReturns] = useState(false);
   const [historyStatus, setHistoryStatus] = useState<LoadStatus>('idle');
   const [isInvoiceReturnConfirmVisible, setIsInvoiceReturnConfirmVisible] = useState(false);
-  const [invoiceReturnAmountInput, setInvoiceReturnAmountInput] = useState('');
   const [isChecklistPendingMode, setIsChecklistPendingMode] = useState(false);
 
   // Signature States
@@ -436,6 +436,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
   const [driverSignature, setDriverSignature] = useState<string | null>(null);
   const [paymentType, setPaymentType] = useState<'Cash' | 'Check' | 'EFT' | 'MO'>('Cash');
   const [checkNumber, setCheckNumber] = useState('');
+  const [isUpcRequired, setIsUpcRequired] = useState(false);
   const [signatureModalType, setSignatureModalType] = useState<'customer' | 'driver' | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const authRef = useRef<{
@@ -709,6 +710,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
   const closeReturnModal = () => {
     setReturnModalProduct(null);
     setReturnQuantityInput('');
+    setReturnUnitPriceInput('');
     setReturnReasonInput('');
     setReturnError(null);
   };
@@ -716,6 +718,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
   const openReturnModal = (product: PersonalInventoryItem) => {
     setReturnModalProduct(product);
     setReturnQuantityInput('');
+    setReturnUnitPriceInput(product.unitPrice !== undefined ? product.unitPrice.toString() : '0.00');
     setReturnReasonInput('');
     setReturnError(null);
   };
@@ -738,6 +741,12 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
       return;
     }
 
+    const requestedUnitPrice = Number.parseFloat(returnUnitPriceInput);
+    if (Number.isNaN(requestedUnitPrice) || requestedUnitPrice < 0) {
+      setReturnError('Enter a valid unit price.');
+      return;
+    }
+
     if (!returnReasonInput || returnReasonInput.trim().length === 0) {
       setReturnError('Please enter a reason for the return.');
       return;
@@ -748,6 +757,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
       [returnModalProduct.id]: {
         quantity: requestedQuantity,
         reason: returnReasonInput,
+        unitPrice: requestedUnitPrice,
       },
     }));
 
@@ -773,6 +783,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
         customer_id: selectedCustomer.id,
         quantity: r.quantity,
         reason: r.reason || undefined,
+        unit_price: r.unitPrice,
       }));
 
     if (returnItems.length === 0) {
@@ -919,6 +930,7 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
     setContainerDepositInput('0');
     setPaymentType('Cash');
     setCheckNumber('');
+    setIsUpcRequired(false);
     openPlaceOrders();
   };
 
@@ -1884,7 +1896,6 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
     const hasReturns = Object.values(selectedReturns).some((r) => r.quantity > 0);
     if (hasReturns) {
       setIsChecklistPendingMode(isChecklistRequest);
-      setInvoiceReturnAmountInput('');
       setIsInvoiceReturnConfirmVisible(true);
     } else {
       handleGenerateBill(isChecklistRequest, []);
@@ -1946,7 +1957,8 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
       isChecklist: isChecklistRequest,
       clientTimestamp: localTimestamp,
       returns: returnsToProcess,
-      returnAmount: returnAmountToDeduct
+      returnAmount: returnAmountToDeduct,
+      isUpcRequired: isUpcRequired
     };
 
     console.log('📦 GENERATING BILL PAYLOAD:', JSON.stringify(payload, null, 2));
@@ -3437,6 +3449,20 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
                     </Text>
                   </View>
 
+                  <TouchableOpacity
+                    onPress={() => setIsUpcRequired(!isUpcRequired)}
+                    style={styles.upcCheckboxRow}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[
+                      styles.upcCheckbox,
+                      isUpcRequired ? styles.upcCheckboxSelected : null
+                    ]}>
+                      {isUpcRequired && <View style={styles.upcCheckboxTick} />}
+                    </View>
+                    <Text style={styles.upcCheckboxLabel}>Is UPC Required?</Text>
+                  </TouchableOpacity>
+
                   <Pressable
                     disabled={generateBillDisabled}
                     onPress={() => handlePreGenerateBill(false)}
@@ -3723,6 +3749,18 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
             />
 
             <Text style={styles.quantityModalInputLabel}>
+              Unit Price
+            </Text>
+            <TextInput
+              keyboardType="decimal-pad"
+              onChangeText={setReturnUnitPriceInput}
+              placeholder="0.00"
+              placeholderTextColor={ui.darkTextMuted}
+              style={styles.quantityModalInput}
+              value={returnUnitPriceInput}
+            />
+
+            <Text style={styles.quantityModalInputLabel}>
               Reason for return
             </Text>
             <TextInput
@@ -3844,21 +3882,23 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
               You have selected items for return. Do you want to process these returns and deduct their amount from this invoice?
             </Text>
 
-            <Text style={styles.modalLabel}>Return Deduction Amount ($)</Text>
-            <TextInput
-              style={styles.modalInput}
-              keyboardType="numeric"
-              placeholder="0.00"
-              placeholderTextColor={ui.textMuted}
-              value={invoiceReturnAmountInput}
-              onChangeText={setInvoiceReturnAmountInput}
-            />
+            <View style={{ marginBottom: spacing.md }}>
+              <Text style={styles.modalLabel}>Auto-Calculated Return Total:</Text>
+              <Text style={{ color: ui.highlight, fontSize: 22, fontWeight: '900', marginTop: 4 }}>
+                ${Object.values(selectedReturns)
+                  .filter(r => r.quantity > 0)
+                  .reduce((sum, r) => sum + (r.quantity * (r.unitPrice || 0)), 0)
+                  .toFixed(2)}
+              </Text>
+            </View>
 
             <View style={[styles.modalActions, { marginTop: spacing.lg, flexDirection: 'column', gap: spacing.sm }]}>
               <Pressable
                 onPress={() => {
                   setIsInvoiceReturnConfirmVisible(false);
-                  const amount = parseFloat(invoiceReturnAmountInput) || 0;
+                  const amount = Object.values(selectedReturns)
+                    .filter((r) => r.quantity > 0)
+                    .reduce((sum, r) => sum + (r.quantity * (r.unitPrice || 0)), 0);
                   const returnsArray = Object.entries(selectedReturns)
                     .filter(([, r]) => r.quantity > 0)
                     .map(([productId, r]) => ({
@@ -3866,8 +3906,9 @@ export function HomeScreen({ onSignOut, session }: HomeScreenProps) {
                       customer_id: selectedCustomer?.id,
                       quantity: r.quantity,
                       reason: r.reason || undefined,
+                      unit_price: r.unitPrice,
                     }));
-                  
+
                   handleGenerateBill(isChecklistPendingMode, returnsArray, amount);
                 }}
                 style={({ pressed }) => [
@@ -6474,5 +6515,36 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     paddingHorizontal: spacing.xl,
     ...shadowPresets.card,
+  },
+  upcCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: spacing.sm,
+  },
+  upcCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: radii.sm,
+    borderWidth: 2,
+    borderColor: ui.cardBorderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.white,
+    marginRight: spacing.sm,
+  },
+  upcCheckboxSelected: {
+    borderColor: ui.highlight,
+    backgroundColor: ui.highlightSoft,
+  },
+  upcCheckboxTick: {
+    width: 10,
+    height: 10,
+    borderRadius: radii.sm,
+    backgroundColor: ui.highlight,
+  },
+  upcCheckboxLabel: {
+    color: palette.white,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
